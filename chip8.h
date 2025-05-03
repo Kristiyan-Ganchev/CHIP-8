@@ -15,6 +15,13 @@ public:
 	unsigned char v[16];
 	unsigned short instruction;
 	bool set_vx_to_vy_8XY6_and_8XYE=true;
+	SDL_Keycode keymap[16] = {
+	SDLK_1, SDLK_2, SDLK_3, SDLK_4,  // 0-3
+	SDLK_q, SDLK_w, SDLK_e, SDLK_r,  // 4-7
+	SDLK_a, SDLK_s, SDLK_d, SDLK_f,  // 8-B
+	SDLK_z, SDLK_x, SDLK_c, SDLK_v   // C-F
+	};
+	unsigned char inputs[16];
 	unsigned char chip8_fontset[80] =
 	{
 	  0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -39,11 +46,12 @@ public:
 		PC = 0x200;
 		instruction = 0;
 		I = 0;
-		sp = 0;
-		memset(gfx, 0, sizeof(gfx) / sizeof(gfx[0]) * sizeof(gfx[0]));
-		memset(memory, 0, sizeof(memory) / sizeof(memory[0]) * sizeof(memory[0]));
-		memset(stack, 0, sizeof(stack) / sizeof(stack[0]) * sizeof(stack[0]));
-		memset(v, 0, sizeof(v) / sizeof(v[0]) * sizeof(v[0]));
+		sp = 0x0;
+		memset(gfx, 0, sizeof(gfx));
+		memset(memory, 0, sizeof(memory));
+		memset(stack, 0, sizeof(stack));
+		memset(v, 0, sizeof(v));
+		memset(inputs, 0, sizeof(inputs));
 		for (int i = 0; i < 80; ++i)
 		{
 			memory[0x50 + i] = chip8_fontset[i];
@@ -74,35 +82,60 @@ public:
 
 	}
 	inline void fetch() {
-		instruction = memory[PC]<<8 | memory[PC+1];
-		PC = PC + 2;
+		 if (PC < 0x200 || PC >= 0x1000) { // Check if PC is outside the valid range of memory
+        std::cerr << "Error: Invalid PC value (" << std::hex << PC << ") during fetch!" << std::endl;
+        system("pause");  // Pause to investigate the issue
+    }
+
+    instruction = memory[PC] << 8 | memory[PC + 1];  // Fetch the instruction (2 bytes)
+    
+    std::cout << "Fetched instruction: " << std::hex << instruction << " at PC: " << std::hex << PC << std::endl;
+    
+    PC += 2; 
 	}
 	inline void decode() {
 		switch (instruction&0xF000) {
-			case 0x0000:{//0x00EE needs to be added, not sure if here
-				memset(gfx,0, sizeof(gfx) / sizeof(gfx[0]) *sizeof(gfx[0]));
+			case 0x0000:{
+				switch (instruction & 0x00FF) {
+					case 0x00E0: {
+					memset(gfx, 0, sizeof(gfx) / sizeof(gfx[0]) * sizeof(gfx[0]));
+					break;
+					}
+					case 0x00EE: {
+					std::cout << "RET: Before pop, sp: " << sp << std::endl;
+					--sp;  // Decrement sp to point to the correct return address
+					PC = stack[sp];  // Pop the return address from the stack
+					std::cout << "RET: After pop, new sp: " << sp << ", new PC: " << PC << std::endl;
+					break;
+					}
+				break;
+				}
 				break;
 			}
 			case 0x1000: {
 				PC = instruction & 0x0FFF;
 				break;
 			}
-			case 0x2000: {//Not sure if correct
-				stack[sp] = PC;
-				sp++;
-				PC = instruction & 0x0FFF;
+			case 0x2000: {
+				std::cout << "CALL: Before push, PC: " << std::hex << PC << ", sp: " << sp << std::endl;
+				stack[sp] = PC;  // Push the current PC onto the stack
+				++sp;  // Increment sp after the push
+
+				PC = instruction & 0x0FFF;  // Set the PC to the subroutine address
+
+				std::cout << "CALL: After push, new PC: " << std::hex << PC << ", new sp: " << sp << std::endl;
 				break;
 			}
 			case 0x3000: {
-				if (v[instruction & 0x0F00 >> 8] == instruction && 0x00FF) PC += 2;
+				if (v[(instruction & 0x0F00) >> 8] == (instruction & 0x00FF)) PC += 2;
 				break;
 			}
 			case 0x4000: {
-				if (v[instruction & 0x0F00 >> 8] != instruction && 0x00FF) PC += 2;
+				if (v[(instruction & 0x0F00) >> 8] != (instruction & 0x00FF)) PC += 2;
 				break;
 			}
 			case 0x5000: {
-				if (v[instruction & 0x0F00 >> 8] == v[instruction & 0x00F0 >> 4]) PC += 2;
+				if (v[(instruction & 0x0F00) >> 8] == v[(instruction & 0x00F0) >> 4]) PC += 2;
 				break;
 			}
 			case 0x6000: {
@@ -132,7 +165,7 @@ public:
 						break;
 					}
 					case 0x0004: {
-						if (v[(instruction & 0x0F00) >> 8] + v[(instruction & 0x00F0) >> 4] >> 255) v[0xF] = 1;
+						if (v[(instruction & 0x0F00) >> 8] + v[(instruction & 0x00F0) >> 4] > 255) v[0xF] = 1;
 						else v[0xF] = 0;
 						v[(instruction & 0x0F00) >> 8] = v[(instruction & 0x0F00) >> 8] + v[(instruction & 0x00F0) >> 4];
 						break;
@@ -182,7 +215,7 @@ public:
 			}
 			case 0xC000: {
 				srand(time(0));
-				v[(instruction & 0x0F00) >> 8] =  rand() % 256&(instruction&0x00FF);
+				v[(instruction & 0x0F00) >> 8] =  (rand() % 256) &(instruction&0x00FF);
 				break;
 			}	
 			case 0xD000: {
@@ -207,6 +240,19 @@ public:
 				break;
 			}
 			//EX9E and EXA1-------------------------------------------------------------------------------------------------------------------------------------
+			case 0xE000: {
+				switch (instruction & 0x00FF) {
+					case 0x009E: {
+						if (inputs[v[(instruction & 0x0F00) >> 8]] == 1) PC += 2;
+						break;
+					}
+					case 0x00A1: {
+						if (inputs[v[(instruction & 0x0F00) >> 8]] == 0) PC += 2;
+						break;
+					}
+				}
+				break;
+			}
 			case 0xF000: {
 				switch (instruction & 0x00FF) {
 					case 0x0007:{
@@ -226,17 +272,211 @@ public:
 						break;
 					}
 					case 0x000A: {
-
+						bool key_found = false;
+						for (int i = 0; i < 16; ++i) {
+							if (inputs[i]) {
+								v[(instruction & 0x0F00) >> 8] = i;
+								key_found = true;
+								break;
+							}
+						}
+						if (!key_found)
+							PC -= 2;
 						break;
 					}
 					case 0x0029: {
-
+						I = 0x50 + (5* v[(instruction & 0x0F00) >> 8]);
+						break;
+					}
+					case 0x0033: {
+						memory[I] = v[(instruction & 0x0F00) >> 8] / 100;
+						memory[I+1] = (v[(instruction & 0x0F00) >> 8] / 10) % 10;
+						memory[I+2] = (v[(instruction & 0x0F00) >> 8] % 100) %10;
+						break;
+					}
+					case 0x0055: {
+						for (int i = 0; i <= ((instruction&0x0F00)>>8); i++)
+						{
+							memory[I+i]=v[i];
+						}
+						break;
+					}
+					case 0x0065: {
+						for (int i = 0; i <= ((instruction & 0x0F00) >> 8); i++)
+						{
+							v[i]=memory[I + i];
+						}
 						break;
 					}
 				}
 				break;
 			}
 		}
+	}
+	inline bool handle_input() {
+		bool quit=false;
+		SDL_Event event;
+		if (SDL_PollEvent(&event)) {
+			switch (event.type) {
+				case SDL_QUIT: {
+					quit = true;
+					break;
+				}
+				case SDL_KEYDOWN: {
+					switch (event.key.keysym.sym) {
+						case SDLK_ESCAPE:
+						{
+							quit = true;
+							break;
+						}
+						case SDLK_x:
+						{
+							inputs[0] = 1;
+							break;
+						}
+						case SDLK_1:
+						{
+							inputs[1] = 1;
+							break;
+						}case SDLK_2:
+						{
+							inputs[2] = 1;
+							break;
+						}case SDLK_3:
+						{
+							inputs[3] = 1;
+							break;
+						}case SDLK_q:
+						{
+							inputs[4] = 1;
+							break;
+						}case SDLK_w:
+						{
+							inputs[5] = 1;
+							break;
+						}case SDLK_e:
+						{
+							inputs[6] = 1;
+							break;
+						}case SDLK_a:
+						{
+							inputs[7] = 1;
+							break;
+						}case SDLK_s:
+						{
+							inputs[8] = 1;
+							break;
+						}case SDLK_d:
+						{
+							inputs[9] = 1;
+							break;
+						}case SDLK_z:
+						{
+							inputs[10] = 1;
+							break;
+						}case SDLK_c:
+						{
+							inputs[11] = 1;
+							break;
+						}case SDLK_4:
+						{
+							inputs[12] = 1;
+							break;
+						}case SDLK_r:
+						{
+							inputs[13] = 1;
+							break;
+						}case SDLK_f:
+						{
+							inputs[14] = 1;
+							break;
+						}case SDLK_v:
+						{
+							inputs[15] = 1;
+							break;
+						}
+					}
+					break;
+				}
+				case SDL_KEYUP: {
+					switch (event.key.keysym.sym) {
+						case SDLK_ESCAPE:
+						{
+							quit = true;
+							break;
+						}
+						case SDLK_x:
+						{
+							inputs[0] = 0;
+							break;
+						}
+						case SDLK_1:
+						{
+							inputs[1] = 0;
+							break;
+						}case SDLK_2:
+						{
+							inputs[2] = 0;
+							break;
+						}case SDLK_3:
+						{
+							inputs[3] = 0;
+							break;
+						}case SDLK_q:
+						{
+							inputs[4] = 0;
+							break;
+						}case SDLK_w:
+						{
+							inputs[5] = 0;
+							break;
+						}case SDLK_e:
+						{
+							inputs[6] = 0;
+							break;
+						}case SDLK_a:
+						{
+							inputs[7] = 0;
+							break;
+						}case SDLK_s:
+						{
+							inputs[8] = 0;
+							break;
+						}case SDLK_d:
+						{
+							inputs[9] = 0;
+							break;
+						}case SDLK_z:
+						{
+							inputs[10] = 0;
+							break;
+						}case SDLK_c:
+						{
+							inputs[11] = 0;
+							break;
+						}case SDLK_4:
+						{
+							inputs[12] = 0;
+							break;
+						}case SDLK_r:
+						{
+							inputs[13] = 0;
+							break;
+						}case SDLK_f:
+						{
+							inputs[14] = 0;
+							break;
+						}case SDLK_v:
+						{
+							inputs[15] = 0;
+							break;
+						}
+					}
+					break;
+				}
+			}
+		}
+		return quit;
 	}
 	inline void print_display(SDL_Renderer* renderer) {
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);  // Set color to black (for clearing the screen)

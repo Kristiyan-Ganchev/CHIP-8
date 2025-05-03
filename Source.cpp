@@ -27,26 +27,28 @@ int main(int argc, char* argv[])
     chip8 chip8;
 
     chip8.init();
-    chip8.load("D:/Projects/IBM Logo.ch8");
+    chip8.load("../Pong.ch8");//test_opcode.ch8 IBM Logo.ch8
     init_SDL(&window, &renderer);
 
     bool running = true;
     SDL_Event e;
 
     while (running) {
-        // Poll events
-        while (SDL_PollEvent(&e) != 0) {
-            if (e.type == SDL_QUIT) {
-                running = false;
-            }
-        }
+        running = !chip8.handle_input();
         chip8.fetch();
         chip8.decode();
         chip8.print_display(renderer);
-
-        // Delay for 16ms to create roughly 60Hz frame rate
+        if (chip8.delay_timer > 0)
+        {
+            --chip8.delay_timer;
+        }
+        if (chip8.sound_timer > 0)
+        {
+            --chip8.sound_timer;
+        }
         SDL_Delay(16);
     }
+
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
